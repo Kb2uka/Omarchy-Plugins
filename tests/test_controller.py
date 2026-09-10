@@ -156,12 +156,12 @@ class ControllerTests(unittest.TestCase):
     def test_atomic_save_failure_preserves_existing_profile(self):
         self.store.save("one", "Desk", dict(mic1=40))
         before = self.path.read_bytes()
-        with patch("babyface.storage.os.replace", side_effect=OSError("disk full")):
+        with patch("babyface.files.os.replace", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 self.store.save("one", "Desk", dict(mic1=41))
         self.assertEqual(self.path.read_bytes(), before)
         self.assertEqual(self.store.load("one", "Desk"), dict(mic1=40))
-        self.assertEqual(list(self.path.parent.glob(".settings-*")), [])
+        self.assertEqual(list(self.path.parent.glob(".babyface-*")), [])
 
     def test_profile_names_do_not_become_file_paths(self):
         self.store.save("one", "../Desk", dict(mic1=40))

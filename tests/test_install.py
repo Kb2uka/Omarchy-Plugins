@@ -52,12 +52,21 @@ class InstallTests(unittest.TestCase):
             backup.mkdir(parents=True)
             (destination / 'value').write_text('old')
             (stage / 'value').write_text('new')
-            rename = Path.rename
-            def same_mount(path, target):
+            rename = os.rename
+            def same_mount(path, target, **kwargs):
+                original_target = target
+                target_parent = kwargs.get('dst_dir_fd')
+                if target_parent is not None:
+                    target = Path(os.readlink(f'/proc/self/fd/{target_parent}')) / target
                 if 'state' in Path(target).parts:
                     raise OSError(errno.EXDEV, 'Cross-device link')
-                return rename(path, target)
-            with patch.object(Path, 'rename', same_mount):
+                return rename(path, original_target, **kwargs)
+            # Prove the guard rejects a cross-filesystem move before checking
+            # that replacement succeeds without attempting one.
+            with self.assertRaises(OSError) as error:
+                same_mount(stage, backup / 'probe')
+            self.assertEqual(error.exception.errno, errno.EXDEV)
+            with patch.object(os, 'rename', same_mount):
                 install.replace_plugin(stage, destination, backup)
             self.assertEqual((destination / 'value').read_text(), 'new')
             self.assertEqual((backup / 'plugin/value').read_text(), 'old')
@@ -70,17 +79,17 @@ class InstallTests(unittest.TestCase):
             for path in (destination, stage, backup):
                 path.mkdir()
             (destination / 'value').write_text('old')
-            rename = Path.rename
-            def fail_stage(path, target):
-                if path == stage:
+            rename = os.rename
+            def fail_stage(path, target, **kwargs):
+                if path == stage.name:
                     raise OSError('Replacement failed')
-                return rename(path, target)
-            with patch.object(Path, 'rename', fail_stage), self.assertRaises(OSError):
+                return rename(path, target, **kwargs)
+            with patch.object(os, 'rename', fail_stage), self.assertRaises(OSError):
                 install.replace_plugin(stage, destination, backup)
             self.assertEqual((destination / 'value').read_text(), 'old')
             self.assertEqual((backup / 'plugin/value').read_text(), 'old')
 
-    def test_dangling_symlink_is_backed_up_and_replaced(self):
+    def test_dangling_symlink_is_rejected_without_replacement(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             destination = root / 'plugin'
@@ -90,10 +99,11 @@ class InstallTests(unittest.TestCase):
             backup.mkdir()
             (stage / 'value').write_text('new')
             destination.symlink_to(root / 'missing')
-            install.replace_plugin(stage, destination, backup)
-            self.assertEqual((destination / 'value').read_text(), 'new')
-            self.assertTrue((backup / 'plugin').is_symlink())
-            self.assertEqual((backup / 'plugin').readlink(), root / 'missing')
+            with self.assertRaises(ValueError):
+                install.replace_plugin(stage, destination, backup)
+            self.assertTrue(destination.is_symlink())
+            self.assertEqual(destination.readlink(), root / 'missing')
+            self.assertFalse((backup / 'plugin').exists())
 
     def test_plain_file_is_backed_up_and_replaced(self):
         with tempfile.TemporaryDirectory() as folder:
