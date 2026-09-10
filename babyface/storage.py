@@ -2,11 +2,10 @@
 
 import copy
 import json
-import os
-import tempfile
 from pathlib import Path
 
 from .protocol import channels, validate_gain
+from .files import atomic_write, read_file
 
 
 def validate_values(values):
@@ -33,10 +32,9 @@ class Store:
     def __init__(self, path):
         self.path = Path(path)
         self.data = {"version": 1, "devices": {}}
-        if self.path.exists():
-            if self.path.stat().st_size > 1024 * 1024:
-                raise ValueError("Settings file is too large")
-            self.data = json.loads(self.path.read_text())
+        content = read_file(self.path)
+        if content is not None:
+            self.data = json.loads(content)
             if not isinstance(self.data, dict) or self.data.get("version") != 1 or not isinstance(self.data.get("devices"), dict):
                 raise ValueError("Unsupported settings file; restore a backup")
             for device in self.data["devices"].values():
@@ -57,23 +55,8 @@ class Store:
     def commit(self, serial, device):
         updated = copy.deepcopy(self.data)
         updated["devices"][serial] = device
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(prefix=".settings-", dir=self.path.parent)
-        try:
-            with os.fdopen(fd, "w") as stream:
-                json.dump(updated, stream, ensure_ascii=False, allow_nan=False, indent=2)
-                stream.write("\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, self.path)
-            directory = os.open(self.path.parent, os.O_DIRECTORY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-        finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+        content = json.dumps(updated, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
+        atomic_write(self.path, content.encode("utf-8"))
         self.data = updated
 
     def remember(self, serial, values):

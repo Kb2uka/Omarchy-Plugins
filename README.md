@@ -8,7 +8,7 @@ the Omarchy bar. A community plugin maintained by KB2UKA.
 
 ## Install
 
-Requires Linux, Omarchy 4 with Quickshell, Python 3, and ALSA (`libasound`). The
+Requires Linux, Omarchy 4 with Quickshell, Python 3.11 or newer, and ALSA (`libasound`). The
 Babyface must be in **class-compliant mode**. No Python packages or administrator
 permissions are needed. The existing USB audio driver remains attached.
 
@@ -26,6 +26,29 @@ run `omarchy restart shell` to clear its component cache. This reloads the
 desktop bar; the separate hardware service and audio applications keep running.
 Cloning with `omarchy plugin add` alone does
 not install the companion service; run `install.py` from the checkout.
+
+### Filesystem safety
+
+Installation and settings access require absolute paths with user-owned,
+non-symlink directories. User directories and existing files must not permit
+writes by other users. Root-owned system ancestors may precede the user-owned
+path. Existing inputs must be regular files owned by the current user with one
+hard link, no symlinks, and a maximum size of 1 MiB per file. These checks also
+apply recursively to plugin backups; unsafe entries stop installation.
+
+Reads use bounded no-follow file descriptors. Service units, settings, and
+backup files use exclusively created, private (0600) temporary files in the
+same directory, followed by checked atomic replacement and directory sync.
+Existing profiles remain intact when a write fails before replacement.
+
+If setup reports an unsafe path, inspect that path and restore a normal
+user-owned directory or file from a trusted backup before retrying. The
+installer does not follow links or repair permissions automatically. Uninstall
+leaves saved-state files untouched, including linked files, and can remove a
+linked plugin directory without following it. An unsafe service unit is rejected
+before service-management commands run; restore that unit from a trusted backup
+before uninstalling. Run installation and development checks as your normal
+user, from a user-owned checkout with no shared write permissions.
 
 ## Controls
 
