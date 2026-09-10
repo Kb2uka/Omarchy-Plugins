@@ -1,0 +1,29 @@
+.pragma library
+
+var background = "#111617"
+var surface = "#191f21"
+var elevated = "#252c2e"
+var control = "#0d1214"
+var border = "#080c0e"
+var highlight = "#555e61"
+var edge = "#333c40"
+var text = "#e4e9ec"
+var secondary = "#afc5d5"
+var muted = "#7c919d"
+var accent = "#55baff"
+var accentDark = "#193b50"
+var accentActive = "#9bdcff"
+var amber = "#e9c64b"
+var danger = "#ec6947"
+var safe = "#82d840"
+var connected = "#54e87d"
+var metalLight = "#dce0df"
+var metalMid = "#9ba1a1"
+var metalDark = "#3c4549"
+var font = "Noto Sans"
+var mono = "JetBrainsMono Nerd Font"
+var spacing = {xxs: 2, xs: 4, small: 6, medium: 8, large: 12, section: 16}
+var radius = {control: 4, panel: 7, chassis: 9}
+var channelHeight = 354
+var desktopWidth = 1240
+var minimumWidth = 1000

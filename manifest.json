@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "kb2uka.babyface",
+  "name": "Babyface Control",
+  "version": "1.0.0",
+  "author": "KB2UKA",
+  "license": "MIT",
+  "description": "A native control room for RME Babyface Pro gains, metering, and profiles.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {"barWidget": "Panel.qml"},
+  "barWidget": {
+    "displayName": "Babyface",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
