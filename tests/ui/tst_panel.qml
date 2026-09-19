@@ -117,6 +117,61 @@ Item {
       compare(commands.signalArguments[0][0].channel, "out3")
       compare(commands.signalArguments[0][0].db, null)
     }
+    function mutedMonitor(restoreDb) {
+      var state = sample()
+      state.channels[1].db = null
+      state.channels[1].muted = true
+      state.channels[1].restore_db = restoreDb
+      panel.snapshot = state
+      wait(40)
+      return findChild(panel, "channel-out1")
+    }
+    function test_muteButtonRestoresPreviousGain() {
+      var card = mutedMonitor(-14)
+      var button = findChild(card, "mute-output")
+      verify(button.enabled)
+      compare(button.text, "UNMUTE OUTPUT")
+      mouseClick(button)
+      compare(commands.count, 1)
+      compare(commands.signalArguments[0][0].channel, "out1")
+      compare(commands.signalArguments[0][0].db, -14)
+      compare(findChild(card, "gain-slider").value, -14)
+    }
+    function test_mutedZeroGainIsRestorable() {
+      var card = mutedMonitor(0)
+      mouseClick(findChild(card, "mute-output"))
+      compare(commands.count, 1)
+      compare(commands.signalArguments[0][0].db, 0)
+    }
+    function test_unknownMutedGainIsNotInvented() {
+      var card = mutedMonitor(null)
+      verify(!findChild(card, "mute-output").enabled)
+      compare(commands.count, 0)
+      verify(findChild(card, "gain-slider").enabled)
+    }
+    function test_pendingAndStaleMuteButtonDoesNotSend() {
+      var card = mutedMonitor(-14)
+      var state = panel.snapshot
+      state.channels[1].pending = true
+      panel.snapshot = JSON.parse(JSON.stringify(state))
+      wait(20)
+      var button = findChild(card, "mute-output")
+      verify(!button.enabled)
+      mouseClick(button)
+      compare(commands.count, 0)
+      state.channels[1].pending = false
+      panel.snapshot = JSON.parse(JSON.stringify(state))
+      panel.stale = true
+      wait(20)
+      verify(!button.enabled)
+      mouseClick(button)
+      compare(commands.count, 0)
+    }
+    function test_zMutedCapture() {
+      mutedMonitor(-14)
+      wait(100)
+      grabImage(panel).save(Qt.resolvedUrl("../../.artifacts/feat_babyface_panel/panel-muted.png").toString().replace("file://", ""))
+    }
     function test_pointerGestureCoalescesAndCommitsRelease() {
       var slider = findChild(findChild(panel, "channel-mic1"), "gain-slider")
       mousePress(slider, slider.width * 0.6, slider.height / 2)

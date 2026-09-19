@@ -15,6 +15,7 @@ class Controller:
         self.items = channels()
         self.by_id = {c["id"]: c for c in self.items}
         self.known = {}
+        self.unmuted = {}
         self.pending = {}
         self.error = ""
         self.last_report = None
@@ -29,6 +30,10 @@ class Controller:
         self.items = channels()
         self.by_id = {c["id"]: c for c in self.items}
         self.known, self.pending = {}, {}
+        device = self.store.device(info["serial"]) if self.store else {}
+        self.unmuted = {key: value for key, value in device.get("last", {}).items()
+                        if key.startswith("out") and value is not None}
+        self.unmuted.update(device.get("unmuted", {}))
         self.last_report, self.save_due = None, None
         self.last_poll, self.restored = -1.0, False
         self.attached_at = self.clock()
@@ -37,7 +42,7 @@ class Controller:
     def detach(self, message="Babyface disconnected"):
         if self.synced and self.known:
             try:
-                self.store.remember(self.info["serial"], self.known)
+                self.store.remember(self.info["serial"], self.known, self.unmuted)
                 self.persisted = True
             except (OSError, ValueError) as exc:
                 message += f"; could not save latest gains: {exc}"
@@ -74,6 +79,7 @@ class Controller:
                 continue
         for key, (target, deadline) in list(self.pending.items()):
             if not self.by_id[key]["readback"] and not self.midi.is_pending(key):
+                self.remember_unmuted(key, target)
                 self.known[key] = target
                 self.by_id[key]["db"] = target
                 self.by_id[key]["muted"] = target is None
@@ -88,12 +94,19 @@ class Controller:
             raise OSError("No hardware feedback received")
         if self.save_due is not None and now >= self.save_due and self.synced and not self.pending:
             try:
-                self.store.remember(self.info["serial"], self.known)
+                self.store.remember(self.info["serial"], self.known, self.unmuted)
                 self.persisted = True
                 self.save_due = None
             except (OSError, ValueError) as exc:
                 self.error = f"Could not save gains: {exc}"
                 self.save_due = now + 5
+
+    def remember_unmuted(self, key, value):
+        if not key.startswith("out") or value is None:
+            return
+        restoring_mute = key in self.pending and self.pending[key][0] is None
+        if key not in self.unmuted or (self.restored and not restoring_mute):
+            self.unmuted[key] = value
 
     def receive_state(self, values):
         self.last_report = self.clock()
@@ -101,6 +114,7 @@ class Controller:
         for key, value in values.items():
             if key not in self.known or value != self.known[key]:
                 changed = True
+            self.remember_unmuted(key, value)
             self.known[key] = value
             self.by_id[key]["db"] = value
             self.by_id[key]["muted"] = value is None
@@ -165,5 +179,6 @@ class Controller:
                       error=self.error, profile=active, profiles=sorted(profiles, key=str.casefold),
                       persisted=self.persisted, updated_at=time.time(),
                       channels=[dict(c, pending=c["id"] in self.pending,
+                                     restore_db=self.unmuted.get(c["id"]),
                                      peak=c["peak"] if self.synced else None) for c in self.items])
         return result

@@ -41,6 +41,77 @@ class ControllerTests(unittest.TestCase):
         self.control.attach(self.midi, dict(serial="one"))
         self.control.receive_state(dict(mic1=40, out3=5, out4=5))
 
+    def restore_gain(self, key):
+        return next(c["restore_db"] for c in self.control.snapshot()["channels"] if c["id"] == key)
+
+    def test_mute_retains_confirmed_gain_and_restores_only_that_output(self):
+        self.control.receive_state(dict(out1=-14, out2=-10.5))
+        self.control.command(dict(op="set", channel="out1", db=None))
+        self.control.receive_state(dict(out1=None))
+        self.assertEqual(self.restore_gain("out1"), -14)
+        self.control.command(dict(op="set", channel="out1", db=self.restore_gain("out1")))
+        self.assertEqual(set(self.control.pending), {"out1"})
+        self.control.receive_state(dict(out1=-14))
+        self.assertFalse(self.control.by_id["out1"]["muted"])
+        self.assertEqual(self.control.known, dict(mic1=40, out1=-14, out2=-10.5, out3=5, out4=5))
+
+    def test_restore_gain_does_not_use_an_unconfirmed_request(self):
+        self.control.command(dict(op="set", channel="out3", db=6))
+        self.control.command(dict(op="set", channel="out3", db=None))
+        self.control.receive_state(dict(out3=None))
+        self.assertEqual(self.restore_gain("out3"), 5)
+
+    def test_restore_gain_survives_restart_while_muted(self):
+        self.control.command(dict(op="set", channel="out3", db=None))
+        self.control.receive_state(dict(out3=None))
+        self.now += 0.5
+        self.control.tick()
+        self.control = Controller(Store(self.path), clock=lambda: self.now)
+        self.control.attach(FakeMidi(), dict(serial="one"))
+        self.control.receive_state(dict(out3=None))
+        self.assertEqual(self.restore_gain("out3"), 5)
+
+    def test_restore_gain_preserved_during_reconnect_mute_restore(self):
+        self.control.command(dict(op="set", channel="out3", db=None))
+        self.control.receive_state(dict(out3=None))
+        self.control.detach()
+        self.control.attach(FakeMidi(), dict(serial="one"))
+        self.control.receive_state(dict(out3=0))
+        self.control.receive_state(dict(out3=0))
+        self.control.receive_state(dict(out3=None))
+        self.assertEqual(self.restore_gain("out3"), 5)
+
+    def test_restore_gain_isolated_by_serial_and_never_invented(self):
+        self.control.detach()
+        self.control.attach(FakeMidi(), dict(serial="two"))
+        self.control.receive_state(dict(out3=None))
+        self.assertIsNone(self.restore_gain("out3"))
+
+    def test_manual_gain_becomes_next_restore_value(self):
+        self.control.receive_state(dict(out3=0))
+        self.control.receive_state(dict(out3=None))
+        self.assertEqual(self.restore_gain("out3"), 0)
+
+    def test_write_only_restore_gain_waits_for_transport(self):
+        self.midi.is_pending = lambda key: True
+        self.control.command(dict(op="set", channel="out7", db=-20))
+        self.assertIsNone(self.restore_gain("out7"))
+        self.midi.is_pending = lambda key: False
+        self.control.tick()
+        self.control.command(dict(op="set", channel="out7", db=None))
+        self.control.tick()
+        self.assertEqual(self.restore_gain("out7"), -20)
+
+    def test_invalid_restore_values_rejected_without_changing_settings(self):
+        for values in ({"mic1": 40}, {"out3": None}, {"out3": 100}, []):
+            with self.subTest(values=values):
+                self.path.write_text(json.dumps({"version": 1, "devices": {
+                    "one": {"last": {}, "profiles": {}, "unmuted": values}}}))
+                before = self.path.read_bytes()
+                with self.assertRaises(ValueError):
+                    Store(self.path)
+                self.assertEqual(self.path.read_bytes(), before)
+
     def test_first_attach_adopts_hardware_without_writes(self):
         self.assertEqual(self.midi.writes, [])
         self.assertEqual(self.control.snapshot()["channels"][0]["db"], 40)

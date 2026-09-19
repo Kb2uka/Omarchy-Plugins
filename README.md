@@ -146,3 +146,12 @@ The panel exposes only supported device features. It has no phantom-power,
 PAD, instrument-mode, routing, clock, or firmware controls. Those features are
 not implemented as decorative buttons. Device serial, connectivity, gains,
 meters, saved state, and profiles come from the running service.
+
+## Changes in 1.0.1
+
+- Output mute is reversible: click **UNMUTE OUTPUT** to restore that channel's
+  previous confirmed gain. The fader and knob retain that level while muted.
+- Restore levels are saved per device and output, including across service restarts.
+  Existing profiles and audio routing are preserved.
+- If a device is first seen already muted and has no saved level, set its gain
+  manually; the plugin never guesses an output volume.

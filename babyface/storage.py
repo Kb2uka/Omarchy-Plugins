@@ -19,6 +19,16 @@ def validate_values(values):
     return dict(values)
 
 
+def validate_unmuted(values):
+    if not isinstance(values, dict):
+        raise ValueError("Invalid unmuted output gains")
+    if values:
+        validate_values(values)
+    if any(not key.startswith("out") or value is None for key, value in values.items()):
+        raise ValueError("Unmuted gains must be known output levels")
+    return dict(values)
+
+
 def profile_name(name):
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 48:
         raise ValueError("Use a profile name between 1 and 48 characters")
@@ -41,6 +51,7 @@ class Store:
                 if (not isinstance(device, dict) or not isinstance(device.get("profiles"), dict)
                         or not isinstance(device.get("last"), dict)):
                     raise ValueError("Invalid device settings")
+                validate_unmuted(device.get("unmuted", {}))
                 if device.get("last"):
                     validate_values(device["last"])
                 if len(device["profiles"]) > 64:
@@ -59,11 +70,13 @@ class Store:
         atomic_write(self.path, content.encode("utf-8"))
         self.data = updated
 
-    def remember(self, serial, values):
+    def remember(self, serial, values, unmuted=None):
         values = validate_values(values)
         device = self.device(serial)
-        if device["last"] != values:
+        unmuted = validate_unmuted(device.get("unmuted", {}) if unmuted is None else unmuted)
+        if device["last"] != values or device.get("unmuted", {}) != unmuted:
             device["last"] = values
+            device["unmuted"] = unmuted
             self.commit(serial, device)
 
     def save(self, serial, name, values):
