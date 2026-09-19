@@ -9,6 +9,7 @@ Rectangle {
   property bool prominent: false
   readonly property bool adjustable: channel.adjustable !== false
   readonly property bool known: channel.db !== null && channel.db !== undefined && isFinite(Number(channel.db))
+  readonly property bool restorable: channel.restore_db !== null && channel.restore_db !== undefined && isFinite(Number(channel.restore_db))
   readonly property bool measured: channel.peak !== null && channel.peak !== undefined && isFinite(Number(channel.peak))
   readonly property real meterRatio: available && measured ? Math.max(0, Math.min(1, (Number(channel.peak) + 60) / 60)) : 0
   readonly property real stepDb: Number(channel.step) || 1
@@ -51,12 +52,12 @@ Rectangle {
   }
   function syncControls() {
     if (!channel.pending) {
-      var value = known ? Number(channel.db) : gainMin
+      var value = known ? Number(channel.db) : channel.muted && restorable ? Number(channel.restore_db) : gainMin
       if (!slider.pressed) slider.value = value
       if (!knob.pressed) knob.value = value
     }
   }
-  onChannelChanged: syncControls()
+  onChannelChanged: Qt.callLater(root.syncControls)
   Component.onCompleted: syncControls()
   onAvailableChanged: if (!available) { dragCommit.stop(); gestureDirty = false; activeControl = null }
   Timer {
@@ -158,12 +159,15 @@ Rectangle {
     StudioButton {
       objectName: "mute-output"
       visible: root.channel.group === "output"
-      text: root.channel.muted ? "MUTED · SET GAIN TO RESTORE" : "MUTE OUTPUT"
+      text: root.channel.muted ? (root.restorable ? "UNMUTE OUTPUT" : "SET GAIN TO UNMUTE") : "MUTE OUTPUT"
       primary: root.channel.muted === true
       implicitHeight: 40; width: parent.width
-      enabled: root.available && !root.channel.muted
-      Accessible.name: "Mute " + root.channel.label
-      onClicked: root.gainRequested(String(root.channel.id), null)
+      enabled: root.available && !root.channel.pending && (!root.channel.muted || root.restorable)
+      Accessible.name: (root.channel.muted ? "Unmute " : "Mute ") + root.channel.label
+      onClicked: {
+        if (!enabled) return
+        root.gainRequested(String(root.channel.id), root.channel.muted ? Number(root.channel.restore_db) : null)
+      }
     }
     Rectangle {
       visible: root.channel.group === "input"
