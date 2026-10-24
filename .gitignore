@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 dist/
+AGENTS.md
+CLAUDE.md
+GEMINI.md

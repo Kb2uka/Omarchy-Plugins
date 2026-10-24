@@ -82,7 +82,7 @@ def serve():
                 try:
                     info = discover()
                     if info:
-                        controller.attach(Midi(info["midi"]), info)
+                        controller.attach(Midi(info["card_number"]), info)
                     else:
                         controller.error = "Connect a Babyface Pro in class-compliant mode"
                 except OSError as exc:

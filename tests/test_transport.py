@@ -4,8 +4,8 @@ import unittest
 from collections import deque
 from unittest.mock import patch
 
-from babyface.hardware import Midi
-from babyface.protocol import REQUEST_STATE, channels, gain_packets
+from babyface.hardware import SYSEX, Address, Event, Midi
+from babyface.protocol import REQUEST_STATE, channels, gain_packets, packet
 
 
 class FakeLibrary:
@@ -13,10 +13,10 @@ class FakeLibrary:
         self.sent = []
         self.limit = 10000
 
-    def snd_rawmidi_write(self, handle, data, size):
+    def send(self, data):
         if self.limit == 0:
             return -errno.EAGAIN
-        count = min(size, self.limit)
+        count = min(len(data), self.limit)
         self.sent.append(data[:count])
         return count
 
@@ -25,11 +25,11 @@ class TransportTests(unittest.TestCase):
     def setUp(self):
         self.midi = object.__new__(Midi)
         self.midi.lib = FakeLibrary()
+        self.midi.send = self.midi.lib.send
         self.midi.pending = deque()
         self.midi.last_send = -1
         self.midi.partial = False
         self.midi.poll_requested = False
-        self.midi.output = ctypes.c_void_p()
         self.now = 1.0
         mock = patch("babyface.hardware.time.monotonic", lambda: self.now)
         mock.start()
@@ -102,6 +102,68 @@ class TransportTests(unittest.TestCase):
             self.now += .1
             self.midi.write(REQUEST_STATE)
         self.assertEqual(len(self.midi.pending), 1)
+
+
+class SequencerTests(unittest.TestCase):
+    """The sequencer path, with libasound replaced by an in-memory queue."""
+
+    def setUp(self):
+        self.midi = object.__new__(Midi)
+        self.midi.seq = ctypes.c_void_p(1)
+        self.midi.port = 0
+        self.midi.device = Address(32, 1)
+        self.midi.pending = deque()
+        self.midi.last_send = -1
+        self.midi.partial = False
+        self.midi.poll_requested = False
+        self.midi.lib = SequencerLibrary()
+
+    def test_reads_sysex_only_from_the_babyface_control_port(self):
+        report = packet(0, [1] * 44)
+        self.midi.lib.queue = [(SYSEX, 32, 1, report[:200]), (SYSEX, 40, 0, report),
+                               (SYSEX, 32, 0, report), (6, 32, 1, b"\x90\x40\x7f"),
+                               (SYSEX, 32, 1, report[200:])]
+        self.assertEqual(self.midi.read(), report)
+
+    def test_overrun_is_skipped_and_reading_continues(self):
+        self.midi.lib.queue = [-errno.ENOSPC, (SYSEX, 32, 1, REQUEST_STATE)]
+        self.assertEqual(self.midi.read(), REQUEST_STATE)
+
+    def test_sends_one_complete_sysex_event_to_subscribers(self):
+        self.assertEqual(self.midi.send(REQUEST_STATE), len(REQUEST_STATE))
+        event_type, flags, dest, data = self.midi.lib.sent[0]
+        self.assertEqual((event_type, flags, dest, data), (SYSEX, 4, (254, 253), REQUEST_STATE))
+        with self.assertRaises(ValueError):
+            self.midi.send(b"\x90\x40\x7f")
+
+    def test_event_layout_matches_alsa(self):
+        self.assertEqual(ctypes.sizeof(Event), 28)
+        self.assertEqual(Event.data.offset, 16)
+
+
+class SequencerLibrary:
+    def __init__(self):
+        self.queue, self.sent, self.keep = [], [], []
+
+    def snd_seq_event_output_direct(self, seq, event):
+        event = event._obj
+        data = ctypes.string_at(event.data.ext.ptr, event.data.ext.len)
+        self.sent.append((event.type, event.flags, (event.dest.client, event.dest.port), data))
+        return 28 + len(data)
+
+    def snd_seq_event_input(self, seq, pointer):
+        if not self.queue:
+            return -errno.EAGAIN
+        item = self.queue.pop(0)
+        if isinstance(item, int):
+            return item
+        event_type, client, port, data = item
+        buffer = ctypes.create_string_buffer(data, len(data))
+        event = Event(type=event_type, source=Address(client, port))
+        event.data.ext.len, event.data.ext.ptr = len(data), ctypes.cast(buffer, ctypes.c_void_p)
+        self.keep.append((buffer, event))
+        pointer._obj.contents = event
+        return len(self.queue)
 
 
 if __name__ == "__main__":
