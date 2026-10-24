@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from babyface.controller import Controller
+from babyface.protocol import UNKNOWN, packet
 from babyface.storage import Store
 
 
@@ -179,6 +180,29 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(self.control.synced)
         self.assertEqual(self.control.pending, {})
         self.assertTrue(self.midi.closed)
+
+    def test_unreadable_state_report_is_shown_not_silent(self):
+        self.midi.read = lambda: packet(0, [0] * 43)
+        self.control.tick()
+        self.assertIn("unreadable hardware report", self.control.snapshot()["error"])
+
+    def test_good_report_clears_the_unreadable_report_error(self):
+        self.midi.read = lambda: packet(0, [0] * 43)
+        self.control.tick()
+        self.control.receive_state(dict(mic1=40))
+        self.assertEqual(self.control.snapshot()["error"], "")
+
+    def test_output_that_becomes_unreadable_is_never_kept_or_saved(self):
+        self.control.receive_state(dict(out1=-12))
+        self.control.receive_state(dict(out1=UNKNOWN))
+        channel = self.control.by_id["out1"]
+        self.assertEqual((channel["db"], channel["muted"]), (None, False))
+        self.assertNotIn("out1", self.control.known)
+        self.now += 0.5
+        self.control.tick()
+        saved = json.loads(self.path.read_text())["devices"]["one"]["last"]
+        self.assertNotIn("out1", saved)
+        self.assertEqual(saved["out3"], 5)
 
     def test_no_feedback_connect_timeout(self):
         self.control.attach(self.midi, dict(serial="one"))

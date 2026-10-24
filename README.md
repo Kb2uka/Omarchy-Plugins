@@ -94,8 +94,10 @@ python3 ~/.config/omarchy/plugins/kb2uka.babyface/babyface.py status
 journalctl --user -u babyface-control --since '5 minutes ago'
 ```
 
-If MIDI is busy, close another hardware-control application that owns Babyface
-Port 2. The service reconnects automatically. It never disconnects the audio
+The service shares Babyface Port 2 through the ALSA sequencer, so it runs
+alongside other MIDI applications (Zeus, a DAW) that listen to every port. If
+MIDI is busy, an application has opened Port 2 directly as raw MIDI; close it
+and the service reconnects automatically. It never disconnects the audio
 driver or changes the interface's mode. With multiple Babyfaces attached it
 asks for one device rather than choosing silently.
 

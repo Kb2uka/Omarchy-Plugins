@@ -2,8 +2,11 @@
 
 import time
 
-from .protocol import Decoder, REQUEST_STATE, channels, gain_packets, peak_values, state_values, validate_gain
+from .protocol import Decoder, REQUEST_STATE, UNKNOWN, channels, gain_packets, peak_values, state_values, validate_gain
 from .storage import validate_values
+
+
+UNREADABLE_REPORT = "Ignored an unreadable hardware report"
 
 
 class Controller:
@@ -75,7 +78,9 @@ class Controller:
                     inputs, outputs = peak_values(words)
                     for item, peak in zip(self.items, inputs + outputs):
                         item["peak"] = peak
-            except ValueError:
+            except ValueError as exc:
+                if sub_id == 0:
+                    self.error = f"{UNREADABLE_REPORT}: {exc}"
                 continue
         for key, (target, deadline) in list(self.pending.items()):
             if not self.by_id[key]["readback"] and not self.midi.is_pending(key):
@@ -110,8 +115,15 @@ class Controller:
 
     def receive_state(self, values):
         self.last_report = self.clock()
+        if self.error.startswith(UNREADABLE_REPORT):
+            self.error = ""
         changed = False
         for key, value in values.items():
+            if value == UNKNOWN:
+                # Never keep, save or restore a level the hardware no longer confirms.
+                changed |= self.known.pop(key, UNKNOWN) != UNKNOWN
+                self.by_id[key]["db"], self.by_id[key]["muted"] = None, False
+                continue
             if key not in self.known or value != self.known[key]:
                 changed = True
             self.remember_unmuted(key, value)

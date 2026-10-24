@@ -1,8 +1,12 @@
 # Hardware protocol and limits
 
 Only the Babyface Pro class-compliant USB identity `2a39:3fb0` is selected.
-The ALSA card ID provides the displayed serial. Port 2 is opened nonblocking
-through `snd_rawmidi_open`; audio continues through `snd-usb-audio`.
+The ALSA card ID provides the displayed serial. Port 2 is reached nonblocking
+through the ALSA sequencer, which shares it with other MIDI applications; a raw
+MIDI open would be exclusive. Each request is one complete SysEx event, and only
+SysEx from the Babyface's own port is accepted. The service's port is not
+exported, so other clients cannot subscribe to it. Audio continues through
+`snd-usb-audio`.
 
 Sources:
 
@@ -15,6 +19,8 @@ Sources:
 The read-only state request is `F0 00 20 0D 10 10 F7`. Payload words use five
 little-endian 7-bit bytes. Responses 0/1/2 carry state and meters. The decoder
 requires exact known message sizes and rejects malformed or impossible gains.
+An output level below the `0x3B` mute sentinel has no documented meaning; that
+output is shown as unknown and the rest of the report is still used.
 
 Input gain writes use sub-ID 4. Microphone writes encode coarse/fine steps;
 reported microphone gains are already in dB. Line gain uses half-dB units.
