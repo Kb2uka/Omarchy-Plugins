@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from babyface.controller import Controller
+from babyface.protocol import packet
 from babyface.storage import Store
 
 
@@ -179,6 +180,11 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(self.control.synced)
         self.assertEqual(self.control.pending, {})
         self.assertTrue(self.midi.closed)
+
+    def test_unreadable_state_report_is_shown_not_silent(self):
+        self.midi.read = lambda: packet(0, [0] * 43)
+        self.control.tick()
+        self.assertIn("unreadable hardware report", self.control.snapshot()["error"])
 
     def test_no_feedback_connect_timeout(self):
         self.control.attach(self.midi, dict(serial="one"))

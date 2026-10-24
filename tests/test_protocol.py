@@ -17,6 +17,13 @@ class ProtocolTests(unittest.TestCase):
                                     out1=-12, out2=-12, out3=-0.5, out4=-0.5,
                                     out5=None, out6=None))
 
+    def test_output_below_mute_sentinel_stays_unknown_without_dropping_report(self):
+        # 2026-10-24 iMac capture: AN2 reports raw level 16, below 0x3B.
+        values = state_values([0x008F0000, 0x000020A8, 0x69348028, 0x0058C864] + [0] * 40)
+        self.assertEqual(values, dict(mic1=40, mic2=0, line3=5.5, line4=0,
+                                    out1=-37.5, out3=-16.5, out4=-16.5,
+                                    out5=-71.5, out6=-71.5))
+
     def test_fragmented_sysex_with_midi_clock(self):
         wire = bytes.fromhex("f0 00 20 0d 10 04 4d 78 2c 51 01 f7")
         decoder = Decoder()

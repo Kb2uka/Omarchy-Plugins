@@ -75,7 +75,9 @@ class Controller:
                     inputs, outputs = peak_values(words)
                     for item, peak in zip(self.items, inputs + outputs):
                         item["peak"] = peak
-            except ValueError:
+            except ValueError as exc:
+                if sub_id == 0:
+                    self.error = f"Ignored an unreadable hardware report: {exc}"
                 continue
         for key, (target, deadline) in list(self.pending.items()):
             if not self.by_id[key]["readback"] and not self.midi.is_pending(key):

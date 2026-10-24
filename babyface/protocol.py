@@ -85,10 +85,10 @@ def state_values(words):
         raise ValueError("Invalid hardware gain report")
     levels = [b & 255, (b >> 9) & 255, (c >> 14) & 255, (c >> 23) & 255,
               d & 255, (d >> 9) & 255]
-    if any(v < MUTE for v in levels):
-        raise ValueError("Invalid hardware output report")
+    # A level below the mute sentinel has no documented meaning. Leave that one
+    # output unknown; dropping the whole report kept the panel from ever syncing.
     gains.update({f"out{i + 1}": None if v == MUTE else 6 + (v - 255) / 2
-                  for i, v in enumerate(levels)})
+                  for i, v in enumerate(levels) if v >= MUTE})
     return gains
 
 
