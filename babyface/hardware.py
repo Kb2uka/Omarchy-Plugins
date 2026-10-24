@@ -55,6 +55,7 @@ class Address(C.Structure):
 
 
 class External(C.Structure):
+    _layout_ = "ms"  # explicit for Python 3.14+; _pack_ already implies it
     _pack_ = 1
     _fields_ = [("len", C.c_uint), ("ptr", C.c_void_p)]
 
@@ -72,7 +73,10 @@ class Event(C.Structure):
 class Midi:
     def __init__(self, card_number):
         self.lib = C.CDLL("libasound.so.2")
-        self.declare()
+        try:
+            self.declare()
+        except AttributeError as exc:
+            raise OSError(errno.ENOSYS, f"libasound lacks a sequencer function: {exc}") from exc
         self.seq = C.c_void_p()
         self.pending = deque()
         self.last_send = -1.0
@@ -80,7 +84,7 @@ class Midi:
         self.partial = False
         self.check(self.lib.snd_seq_open(C.byref(self.seq), b"default", OPEN_DUPLEX, NONBLOCK))
         try:
-            self.lib.snd_seq_set_client_name(self.seq, b"Babyface Control")
+            self.check(self.lib.snd_seq_set_client_name(self.seq, b"Babyface Control"))
             self.device = Address(self.find_client(card_number), CONTROL_PORT)
             port = self.lib.snd_seq_create_simple_port(self.seq, b"Babyface Control", PORT_CAPS, PORT_TYPE)
             self.check(port)

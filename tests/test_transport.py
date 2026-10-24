@@ -120,7 +120,7 @@ class SequencerTests(unittest.TestCase):
 
     def test_reads_sysex_only_from_the_babyface_control_port(self):
         report = packet(0, [1] * 44)
-        self.midi.lib.queue = [(SYSEX, 32, 1, report[:200]), (SYSEX, 40, 0, report),
+        self.midi.lib.queue = [(SYSEX, 32, 1, report[:200]), (SYSEX, 40, 0, report), (SYSEX, 40, 1, report),
                                (SYSEX, 32, 0, report), (6, 32, 1, b"\x90\x40\x7f"),
                                (SYSEX, 32, 1, report[200:])]
         self.assertEqual(self.midi.read(), report)
@@ -131,10 +131,35 @@ class SequencerTests(unittest.TestCase):
 
     def test_sends_one_complete_sysex_event_to_subscribers(self):
         self.assertEqual(self.midi.send(REQUEST_STATE), len(REQUEST_STATE))
-        event_type, flags, dest, data = self.midi.lib.sent[0]
-        self.assertEqual((event_type, flags, dest, data), (SYSEX, 4, (254, 253), REQUEST_STATE))
+        event_type, flags, queue, dest, data = self.midi.lib.sent[0]
+        self.assertEqual((event_type, flags, queue, dest, data), (SYSEX, 4, 253, (254, 253), REQUEST_STATE))
         with self.assertRaises(ValueError):
             self.midi.send(b"\x90\x40\x7f")
+
+    def test_one_read_is_bounded(self):
+        self.midi.lib.queue = [(SYSEX, 32, 1, b"\xf8")] * 261
+        self.assertEqual(len(self.midi.read()), 256)
+        self.assertEqual(len(self.midi.lib.queue), 5)
+
+    def test_open_subscribes_both_ways_to_the_control_port_of_the_card(self):
+        lib = OpenLibrary(card_clients={2: 24, 4: 32})
+        with patch("babyface.hardware.C.CDLL", lambda name: lib):
+            midi = Midi(4)
+        self.assertEqual(lib.connections, [("from", 7, 32, 1), ("to", 7, 32, 1)])
+        self.assertEqual((midi.device.client, midi.device.port, midi.port), (32, 1, 7))
+        midi.close()
+        midi.close()
+        self.assertEqual(lib.closed, 1)
+
+    def test_failed_open_closes_the_sequencer(self):
+        lib = OpenLibrary(card_clients={2: 24})
+        with patch("babyface.hardware.C.CDLL", lambda name: lib), self.assertRaises(OSError):
+            Midi(4)
+        self.assertEqual(lib.closed, 1)
+        lib = OpenLibrary(card_clients={4: 32}, connect_result=-errno.EBUSY)
+        with patch("babyface.hardware.C.CDLL", lambda name: lib), self.assertRaises(OSError):
+            Midi(4)
+        self.assertEqual(lib.closed, 1)
 
     def test_event_layout_matches_alsa(self):
         self.assertEqual(ctypes.sizeof(Event), 28)
@@ -148,7 +173,7 @@ class SequencerLibrary:
     def snd_seq_event_output_direct(self, seq, event):
         event = event._obj
         data = ctypes.string_at(event.data.ext.ptr, event.data.ext.len)
-        self.sent.append((event.type, event.flags, (event.dest.client, event.dest.port), data))
+        self.sent.append((event.type, event.flags, event.queue, (event.dest.client, event.dest.port), data))
         return 28 + len(data)
 
     def snd_seq_event_input(self, seq, pointer):
@@ -164,6 +189,54 @@ class SequencerLibrary:
         self.keep.append((buffer, event))
         pointer._obj.contents = event
         return len(self.queue)
+
+
+class Function:
+    """Stands in for a libasound symbol: accepts argtypes and forwards calls."""
+
+    def __init__(self, call):
+        self.call = call
+
+    def __call__(self, *args):
+        return self.call(*args)
+
+
+class OpenLibrary:
+    def __init__(self, card_clients, connect_result=0):
+        self.cards = sorted(card_clients.items(), key=lambda item: item[1])
+        self.connect_result, self.connections, self.closed, self.index = connect_result, [], 0, -1
+
+    def __getattr__(self, name):
+        calls = dict(
+            snd_strerror=lambda code: b"error",
+            snd_seq_open=lambda handle, name, mode, flags: setattr(handle._obj, "value", 1) or 0,
+            snd_seq_close=lambda seq: setattr(self, "closed", self.closed + 1) or 0,
+            snd_seq_set_client_name=lambda seq, name: 0,
+            snd_seq_create_simple_port=lambda seq, name, caps, kind: 7,
+            snd_seq_connect_from=lambda seq, port, client, dest: self.connect("from", port, client, dest),
+            snd_seq_connect_to=lambda seq, port, client, dest: self.connect("to", port, client, dest),
+            snd_seq_client_info_malloc=lambda info: 0,
+            snd_seq_client_info_free=lambda info: None,
+            snd_seq_client_info_set_client=lambda info, client: setattr(self, "index", -1),
+            snd_seq_query_next_client=lambda seq, info: self.next_client(),
+            snd_seq_client_info_get_card=lambda info: self.cards[self.index][0],
+            snd_seq_client_info_get_client=lambda info: self.cards[self.index][1],
+            snd_seq_event_output_direct=lambda seq, event: 0,
+            snd_seq_event_input=lambda seq, event: -errno.EAGAIN,
+        )
+        if name not in calls:
+            raise AttributeError(name)
+        function = Function(calls[name])
+        setattr(self, name, function)
+        return function
+
+    def next_client(self):
+        self.index += 1
+        return 0 if self.index < len(self.cards) else -errno.ENOENT
+
+    def connect(self, direction, port, client, dest):
+        self.connections.append((direction, port, client, dest))
+        return self.connect_result
 
 
 if __name__ == "__main__":
